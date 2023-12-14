@@ -1,7 +1,7 @@
 import collections
 import socket
 import subprocess
-from asyncio import CancelledError, InvalidStateError, base_subprocess, transports
+from asyncio import BufferedProtocol, CancelledError, InvalidStateError, base_subprocess, transports
 
 
 class BaseTransport(transports.BaseTransport):
@@ -124,7 +124,21 @@ class ReadTransport(BaseTransport, transports.ReadTransport):
 
     def _submit_read_data(self, data):
         if data:
-            self._protocol.data_received(data)
+            if isinstance(self._protocol, BufferedProtocol):
+                # This is the most inefficient way to support
+                # BufferedProtocol (which was introduced as a more
+                # efficient interface than the regular
+                # Protocol). Doing it properly would involve using
+                # some kind of sock_recv_into method, but I don't
+                # understand the gbulb code well enough to do this.
+                while data:
+                    buf = self._protocol.get_buffer(len(data))
+                    n = min(len(buf), len(data))
+                    buf[0:n] = data[0:n]
+                    self._protocol.buffer_updated(n)
+                    data = data[n:]
+            else:
+                self._protocol.data_received(data)
         else:
             keep_open = self._protocol.eof_received()
             if not keep_open:
